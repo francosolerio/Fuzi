@@ -93,8 +93,12 @@ open class XMLDocument {
   - returns: An `XMLDocument` with the contents of the specified XML string.
   */
   public convenience init(data: Data) throws {
-    let buffer = data.withUnsafeBytes { $0.bindMemory(to: Int8.self) }
-    try self.init(buffer: buffer)
+    let parser = type(of: self)
+    // Parse inside the closure. The pointer is not valid after the closure returns.
+    let document = data.withUnsafeBytes { bytes in
+      parser.parse(buffer: bytes.bindMemory(to: Int8.self), options: XMLDocument.defaultParseOptions)
+    }
+    try self.init(parsedDocument: document)
   }
   
   /**
@@ -107,10 +111,13 @@ open class XMLDocument {
   - returns: An `XMLDocument` with the contents of the specified XML string.
   */
   public convenience init(cChars: [CChar]) throws {
-    let buffer = cChars.withUnsafeBufferPointer { buffer in
-        UnsafeBufferPointer(rebasing: buffer[0..<buffer.count])
+    let parser = type(of: self)
+    // Parse inside the closure. The pointer is not valid after the closure returns.
+    // Optimized builds can release the array before a later read.
+    let document = cChars.withUnsafeBufferPointer { buffer in
+      parser.parse(buffer: buffer, options: XMLDocument.defaultParseOptions)
     }
-    try self.init(buffer: buffer)
+    try self.init(parsedDocument: document)
   }
 
   /**
@@ -124,12 +131,17 @@ open class XMLDocument {
    */
 
   public convenience init(buffer: UnsafeBufferPointer<Int8>) throws {
-    let options = Int32(XML_PARSE_NOWARNING.rawValue | XML_PARSE_NOERROR.rawValue | XML_PARSE_RECOVER.rawValue)
-    try self.init(buffer: buffer, options: options)
+    try self.init(buffer: buffer, options: XMLDocument.defaultParseOptions)
   }
 
   fileprivate convenience init(buffer: UnsafeBufferPointer<Int8>, options: Int32) throws {
-    guard let document = type(of: self).parse(buffer: buffer, options: options) else {
+    try self.init(parsedDocument: type(of: self).parse(buffer: buffer, options: options))
+  }
+
+  fileprivate static let defaultParseOptions = Int32(XML_PARSE_NOWARNING.rawValue | XML_PARSE_NOERROR.rawValue | XML_PARSE_RECOVER.rawValue)
+
+  fileprivate convenience init(parsedDocument: xmlDocPtr?) throws {
+    guard let document = parsedDocument else {
       throw XMLError.lastError(defaultError: .parserFailure)
     }
     xmlResetLastError()
